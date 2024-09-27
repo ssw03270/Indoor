@@ -22,7 +22,7 @@ def tokenize_dialog(dialog, tokenizer):
     answer_tokens = [tokenizer.encode(f"{answer['content'].strip()} {tokenizer.eos_token}", add_special_tokens=False) for answer in dialog[1::2]]
     
     # dialog_tokens = list(itertools.chain.from_iterable(zip(prompt_tokens, answer_tokens)))
-    dialog_tokens = [dialog_token + answer_token for dialog_token, answer_token in zip(prompt_tokens, answer_tokens)]
+    dialog_tokens = [dialog_token for dialog_token in prompt_tokens]
     labels_tokens = [len(c)*[-100,] if i % 2 == 0 else c for i, c in enumerate(dialog_tokens)]
 
     combined_tokens = {
