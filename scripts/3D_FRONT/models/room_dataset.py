@@ -17,7 +17,6 @@ def tokenize_dialog(dialog, tokenizer):
         "input_ids": dialog_tokens,
         "labels": labels_tokens,
     }
-    print(len(combined_tokens))
 
     # attention_mask도 이중 리스트로 변경
     attention_mask = [[1] * len(t) for t in dialog_tokens]
