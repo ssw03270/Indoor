@@ -25,6 +25,17 @@ from llama_recipes.inference.safety_utils import get_safety_checker
 B_INST, E_INST = "[INST]", "[/INST]"
 
 def tokenize_dialog(dialog, tokenizer):
+    dialog_data = []
+    for entry in dialog:
+        instruction = entry.get("instruction", "")
+        input_text = entry.get("input", "")
+        output_text = entry.get("output", "")
+
+        # 사용자와 어시스턴트 역할 설정
+        dialog_data.append({"role": "user", "content": f"{B_INST} {instruction} {E_INST} {input_text}"})
+        dialog_data.append({"role": "assistant", "content": output_text})
+    dialog = dialog_data
+
     prompt_tokens = [tokenizer.encode(f"{tokenizer.bos_token}{B_INST} {(prompt['content']).strip()} {E_INST}", add_special_tokens=False) for prompt in dialog[::2]]
     answer_tokens = [tokenizer.encode(f"{answer['content'].strip()} {tokenizer.eos_token}", add_special_tokens=False) for answer in dialog[1::2]]
     
