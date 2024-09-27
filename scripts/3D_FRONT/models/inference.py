@@ -135,7 +135,7 @@ def main(
             safety_checker = get_safety_checker(enable_azure_content_safety,
                                         enable_sensitive_topics,
                                         enable_saleforce_content_safety,
-                                        )
+                                        enable_llamaguard_content_safety=None)
             # Safety check of the user prompt
             safety_results = [check(dialogs[idx][0]["content"]) for check in safety_checker]
             are_safe = all([r[1] for r in safety_results])
