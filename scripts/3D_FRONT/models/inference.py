@@ -11,6 +11,13 @@ import json
 import torch
 from transformers import LlamaTokenizer
 
+from transformers import (
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    LlamaForCausalLM,
+    LlamaConfig,
+)
+
 from llama_recipes.inference.chat_utils import read_dialogs_from_file
 from llama_recipes.inference.model_utils import load_model, load_peft_model
 from llama_recipes.inference.safety_utils import get_safety_checker
@@ -102,7 +109,7 @@ def main(
         except ImportError:
             print("Module 'optimum' not found. Please install 'optimum' it before proceeding.")
 
-    tokenizer = LlamaTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.add_special_tokens(
         {
          
