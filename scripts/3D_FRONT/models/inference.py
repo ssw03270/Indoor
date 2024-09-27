@@ -25,43 +25,33 @@ from llama_recipes.inference.safety_utils import get_safety_checker
 B_INST, E_INST = "[INST]", "[/INST]"
 
 def tokenize_dialog(dialog, tokenizer):
+    prompt_tokens = [tokenizer.encode(f"{tokenizer.bos_token}{B_INST} {(prompt['content']).strip()} {E_INST}", add_special_tokens=False) for prompt in dialog]
+
+    # dialog_tokens = list(itertools.chain.from_iterable(zip(prompt_tokens, answer_tokens)))
+    dialog_tokens = [dialog_token for dialog_token in prompt_tokens]
+
+    return dialog_tokens
+
+def load_json_dataset(json_file, split="validation"):
+    with open(json_file, 'r') as f:
+        data = json.load(f)
+
     dialog_data = []
-    for entry in dialog:
+    gt_data = []
+    for entry in data:
         instruction = entry.get("instruction", "")
         input_text = entry.get("input", "")
         output_text = entry.get("output", "")
 
         # 사용자와 어시스턴트 역할 설정
         dialog_data.append({"role": "user", "content": f"{B_INST} {instruction} {E_INST} {input_text}"})
-        dialog_data.append({"role": "assistant", "content": output_text})
-    dialog = dialog_data
-
-    prompt_tokens = [tokenizer.encode(f"{tokenizer.bos_token}{B_INST} {(prompt['content']).strip()} {E_INST}", add_special_tokens=False) for prompt in dialog[::2]]
-    answer_tokens = [tokenizer.encode(f"{answer['content'].strip()} {tokenizer.eos_token}", add_special_tokens=False) for answer in dialog[1::2]]
-    
-    # dialog_tokens = list(itertools.chain.from_iterable(zip(prompt_tokens, answer_tokens)))
-    dialog_tokens = [dialog_token for dialog_token in prompt_tokens]
-    labels_tokens = [len(c)*[-100,] if i % 2 == 0 else c for i, c in enumerate(dialog_tokens)]
-
-    combined_tokens = {
-        "input_ids": dialog_tokens,
-        "labels": labels_tokens,
-    }
-
-    # attention_mask도 이중 리스트로 변경
-    attention_mask = [[1] * len(t) for t in dialog_tokens]
-
-    return dict(combined_tokens, attention_mask=attention_mask)
-
-def load_json_dataset(json_file, split="validation"):
-    with open(json_file, 'r') as f:
-        data = json.load(f)
+        gt_data.append({"role": "assistant", "content": output_text})
 
     eval_length = int(len(data)/20)
     if split == "train":
-        return data[eval_length:]
+        return dialog_data[eval_length:], gt_data[eval_length:]
     else:
-        return data[:eval_length]
+        return dialog_data[:eval_length], gt_data[:eval_length]
 
 def main(
     model_name,
@@ -90,7 +80,7 @@ def main(
             prompt_file
         ), f"Provided Prompt file does not exist {prompt_file}"
 
-        dialogs= load_json_dataset(prompt_file)
+        dialogs, gts= load_json_dataset(prompt_file)
 
     elif not sys.stdin.isatty():
         dialogs = "\n".join(sys.stdin.readlines())
@@ -137,11 +127,11 @@ def main(
                                         enable_saleforce_content_safety,
                                         enable_llamaguard_content_safety=None)
             # Safety check of the user prompt
-            safety_results = [check(dialogs[idx][0]["content"]) for check in safety_checker]
+            safety_results = [check(dialogs[idx]["content"]) for check in safety_checker]
             are_safe = all([r[1] for r in safety_results])
             if are_safe:
                 print(f"User prompt deemed safe.")
-                print("User prompt:\n", dialogs[idx][0]["content"])
+                print("User prompt:\n", dialogs[idx]["content"])
                 print("\n==================================\n")
             else:
                 print("User prompt deemed unsafe.")
