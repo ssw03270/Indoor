@@ -73,6 +73,7 @@ def main(
     enable_saleforce_content_safety: bool=False, # Enable safety check woth Saleforce safety flan t5
     use_fast_kernels: bool = False, # Enable using SDPA from PyTorch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
     batch_size: int = 4,  # 배치 크기 추가
+    local_rank: int = -1,  # local_rank 매개변수 추가
     **kwargs
 ):
     if prompt_file is not None:
@@ -93,7 +94,10 @@ def main(
 
 
     # GPU 사용 가능 여부 확인 및 사용 가능한 GPU 수 파악
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if local_rank == -1:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    else:
+        device = torch.device(f'cuda:{local_rank}')
     num_gpus = torch.cuda.device_count()
     print(f"사용 가능한 GPU 수: {num_gpus}")
 
