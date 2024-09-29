@@ -71,6 +71,7 @@ def main(
     enable_sensitive_topics: bool=False, # Enable check for sensitive topics using AuditNLG APIs
     enable_saleforce_content_safety: bool=False, # Enable safety check woth Saleforce safety flan t5
     use_fast_kernels: bool = False, # Enable using SDPA from PyTorch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
+    batch_size: int = 4,  # 배치 크기 추가
     **kwargs
 ):
     if prompt_file is not None:
@@ -119,29 +120,16 @@ def main(
     chats = tokenize_dialog(dialogs, tokenizer)
     outputs_list = []
     with torch.no_grad():
-        for idx, chat in tqdm(enumerate(chats), total=len(chats), desc="처리 중"):
-            safety_checker = get_safety_checker(enable_azure_content_safety,
-                                        enable_sensitive_topics,
-                                        enable_saleforce_content_safety,
-                                        enable_llamaguard_content_safety=None)
-            # Safety check of the user prompt
-            safety_results = [check(dialogs[idx]["content"]) for check in safety_checker]
-            are_safe = all([r[1] for r in safety_results])
-            if are_safe:
-                print(f"User prompt deemed safe.")
-                print("User prompt:\n", dialogs[idx]["content"])
-                print("\n==================================\n")
-            else:
-                print("User prompt deemed unsafe.")
-                for method, is_safe, report in safety_results:
-                    if not is_safe:
-                        print(method)
-                        print(report)
-                print("Skipping the inferece as the prompt is not safe.")
-                sys.exit(1)  # Exit the program with an error status
-            tokens= torch.tensor(chat).long()
-            tokens= tokens.unsqueeze(0)
-            tokens= tokens.to("cuda:0")
+        for i in tqdm(range(0, len(chats), batch_size), desc="배치 처리 중"):
+            batch_chats = chats[i:i+batch_size]
+            
+            # 배치 내 최대 길이로 패딩
+            max_length = max(len(chat) for chat in batch_chats)
+            padded_chats = [chat + [tokenizer.pad_token_id] * (max_length - len(chat)) for chat in batch_chats]
+            
+            tokens = torch.tensor(padded_chats).long().to("cuda:0")
+            
+            # 배치 단위로 생성
             outputs = model.generate(
                 input_ids=tokens,
                 max_new_tokens=max_new_tokens,
@@ -155,24 +143,23 @@ def main(
                 **kwargs
             )
 
-            output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            # 배치 출력 처리
+            for output in outputs:
+                output_text = tokenizer.decode(output, skip_special_tokens=True)
+                outputs_list.append(output_text)
 
-            # Safety check of the model output
-            safety_results = [check(output_text) for check in safety_checker]
-            are_safe = all([r[1] for r in safety_results])
-            if are_safe:
-                print("User input and model output deemed safe.")
-                print(f"Model output:\n{output_text}")
-                print("\n==================================\n")
-
-            else:
-                print("Model output deemed unsafe.")
-                for method, is_safe, report in safety_results:
-                    if not is_safe:
-                        print(method)
-                        print(report)
-            
-            outputs_list.append(output_text)
+            # 안전성 검사 (배치의 각 항목에 대해)
+            for j, output_text in enumerate(outputs_list[-len(batch_chats):]):
+                safety_results = [check(output_text) for check in safety_checker]
+                are_safe = all([r[1] for r in safety_results])
+                if are_safe:
+                    print(f"배치 {i//batch_size + 1}, 항목 {j+1}: 사용자 입력 및 모델 출력이 안전합니다.")
+                else:
+                    print(f"배치 {i//batch_size + 1}, 항목 {j+1}: 모델 출력이 안전하지 않습니다.")
+                    for method, is_safe, report in safety_results:
+                        if not is_safe:
+                            print(method)
+                            print(report)
 
     result = []
     for dialog, output in zip(dialogs, outputs_list):
