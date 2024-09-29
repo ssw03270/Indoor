@@ -97,6 +97,7 @@ def main(
     if local_rank == -1:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     else:
+        torch.cuda.set_device(local_rank)
         device = torch.device(f'cuda:{local_rank}')
     num_gpus = torch.cuda.device_count()
     print(f"사용 가능한 GPU 수: {num_gpus}")
