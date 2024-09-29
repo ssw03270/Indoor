@@ -129,19 +129,11 @@ def main(
             
             tokens = torch.tensor(padded_chats).long().to(device)
             
-            # 모델 생성 부분 수정
-            outputs = model.module.generate(
-                input_ids=tokens,
-                max_new_tokens=max_new_tokens,
-                do_sample=do_sample,
-                top_p=top_p,
-                temperature=temperature,
-                use_cache=use_cache,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                length_penalty=length_penalty,
-                **kwargs
-            ) if isinstance(model, nn.DataParallel) else model.generate(
+            # DataParallel을 사용할 경우 model.module을 사용
+            generate_func = model.module.generate if isinstance(model, nn.DataParallel) else model.generate
+            
+            # 배치 단위로 생성
+            outputs = generate_func(
                 input_ids=tokens,
                 max_new_tokens=max_new_tokens,
                 do_sample=do_sample,
