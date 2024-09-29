@@ -147,20 +147,9 @@ def main(
             for output in outputs:
                 output_text = tokenizer.decode(output, skip_special_tokens=True)
                 outputs_list.append(output_text)
-
-            # 안전성 검사 (배치의 각 항목에 대해)
-            for j, output_text in enumerate(outputs_list[-len(batch_chats):]):
-                safety_results = [check(output_text) for check in safety_checker]
-                are_safe = all([r[1] for r in safety_results])
-                if are_safe:
-                    print(f"배치 {i//batch_size + 1}, 항목 {j+1}: 사용자 입력 및 모델 출력이 안전합니다.")
-                else:
-                    print(f"배치 {i//batch_size + 1}, 항목 {j+1}: 모델 출력이 안전하지 않습니다.")
-                    for method, is_safe, report in safety_results:
-                        if not is_safe:
-                            print(method)
-                            print(report)
-
+                print(f"Model output:\n{output_text}")
+                print("\n==================================\n")
+                
     result = []
     for dialog, output in zip(dialogs, outputs_list):
         result.append({
