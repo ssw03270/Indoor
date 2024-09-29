@@ -8,6 +8,8 @@ import os
 import sys
 import json
 
+from tqdm import tqdm
+
 import torch
 from transformers import LlamaTokenizer
 
@@ -119,9 +121,9 @@ def main(
     )
     
     chats = tokenize_dialog(dialogs, tokenizer)
-
+    outputs = []
     with torch.no_grad():
-        for idx, chat in enumerate(chats):
+        for idx, chat in tqdm(enumerate(chats), total=len(chats), desc="처리 중"):
             safety_checker = get_safety_checker(enable_azure_content_safety,
                                         enable_sensitive_topics,
                                         enable_saleforce_content_safety,
@@ -173,6 +175,20 @@ def main(
                     if not is_safe:
                         print(method)
                         print(report)
+            
+            outputs.append(output_text)
+            
+    result = []
+    for dialog, output in zip(dialogs, outputs):
+        result.append({
+            "input": dialog["content"],
+            "output": output
+        })
+    
+    with open('inference_results.json', 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    print("결과가 'inference_results.json' 파일에 저장되었습니다.")
 
 
 

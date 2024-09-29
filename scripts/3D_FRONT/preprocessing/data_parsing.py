@@ -82,7 +82,7 @@ for room in room_lists:
         # 방 레이아웃 시각화
         # visualize_room_layout(boxes_parsed_data, folder)
         try:
-            without_margin_codes, numerical_margin_codes, discrete_margin_codes, is_overlap = layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=False, case_count=10)
+            without_margin_codes, numerical_margin_codes, discrete_margin_codes, is_overlap = layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=False, case_count=1)
             # print(f"생성된 코드:\n{generated_code}")
 
             if is_overlap:
