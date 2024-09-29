@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pickle
 import json
+import random
 from tqdm import tqdm
 
 from utils import visualize_room_layout, generate_text_description, layout_to_code
@@ -9,10 +10,15 @@ from utils import visualize_room_layout, generate_text_description, layout_to_co
 folder_path = 'C:/Users/ttd85/Documents/Resources/IndoorSceneSynthesis/InstructScene'
 room_lists = ["threed_front_bedroom", "threed_front_diningroom", "threed_front_livingroom"]
 
+random.seed(42)
+np.random.seed(42)
+
 for room in room_lists:
     overlap_count = 0
     error_count = 0    
-    room_data = []
+    without_margin_room_data = []
+    numerical_margin_room_data = []
+    discrete_margin_room_data = []
 
     path = os.path.join(folder_path, room)
     
@@ -70,25 +76,40 @@ for room in room_lists:
         relations_parsed_data = relations_npy.tolist()                          # shape: (relations_count, 3) ex) [[0, 4, 1], [0, 4, 2], [0, 9, 3], ...]
                 
         # 영어 텍스트 설명 생성
-        text_description = generate_text_description(boxes_parsed_data['scene_type'], models_info_parsed_data)
+        text_descriptions = generate_text_description(boxes_parsed_data['scene_type'], models_info_parsed_data)
         # print(f"생성된 영어 텍스트 설명: {text_description}")z
 
         # 방 레이아웃 시각화
         # visualize_room_layout(boxes_parsed_data, folder)
         try:
-            generated_code, is_overlap = layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=False)
+            without_margin_codes, numerical_margin_codes, discrete_margin_codes, is_overlap = layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=False, case_count=10)
             # print(f"생성된 코드:\n{generated_code}")
 
             if is_overlap:
                 overlap_count += 1
                 continue
+            
+            for text_description, without_margin_code, numerical_margin_code, discrete_margin_code in zip(
+                text_descriptions, without_margin_codes, numerical_margin_codes, discrete_margin_codes):
+                without_margin_room_data.append({
+                    "scene_uid": boxes_parsed_data['scene_uid'],
+                    "instruction": "Generate a room layout based on the given requirements.",
+                    "input": text_description,
+                    "output": without_margin_code
+                })
+                numerical_margin_room_data.append({
+                    "scene_uid": boxes_parsed_data['scene_uid'],
+                    "instruction": "Generate a room layout based on the given requirements.",
+                    "input": text_description,
+                    "output": numerical_margin_code
+                })
+                discrete_margin_room_data.append({
+                    "scene_uid": boxes_parsed_data['scene_uid'],
+                    "instruction": "Generate a room layout based on the given requirements.",
+                    "input": text_description,
+                    "output": discrete_margin_code
+                })
                 
-            room_data.append({
-                "instruction": "Generate a room layout based on the given requirements.",
-                "input": text_description,
-                "output": generated_code
-            })
-
         except:
             error_count += 1
             continue
@@ -101,12 +122,29 @@ for room in room_lists:
     print(f"  - 성공적으로 처리된 폴더 수: {len(folder_list) - error_count - overlap_count}")
     print("-----------------------------")
 
+    # 랜덤 인덱스 리스트 생성
+    random_indices = list(range(len(without_margin_room_data)))
+    random.shuffle(random_indices)
+
+    without_margin_room_data = np.array(without_margin_room_data)[random_indices].tolist()
+    numerical_margin_room_data = np.array(numerical_margin_room_data)[random_indices].tolist()
+    discrete_margin_room_data = np.array(discrete_margin_room_data)[random_indices].tolist()
+
     # 각 방 유형별로 설명과 코드를 하나의 pkl 파일로 저장
     output_folder = os.path.join(folder_path, 'output')
     os.makedirs(output_folder, exist_ok=True)
     
-    output_file = os.path.join(path, f'{room}_data.json')
+    output_file = os.path.join(path, f'{room}_without_margin_room_data.json')
     with open(output_file, 'w') as json_file:
-        json.dump(room_data, json_file, indent=4)
+        json.dump(without_margin_room_data, json_file, indent=4)
+    print(f"{room}에 대한 설명과 코드가 {output_file}에 저장되었습니다.")
+
+    output_file = os.path.join(path, f'{room}_numerical_margin_room_data.json')
+    with open(output_file, 'w') as json_file:
+        json.dump(numerical_margin_room_data, json_file, indent=4)
+    print(f"{room}에 대한 설명과 코드가 {output_file}에 저장되었습니다.")
     
+    output_file = os.path.join(path, f'{room}_discrete_margin_room_data.json')
+    with open(output_file, 'w') as json_file:
+        json.dump(discrete_margin_room_data, json_file, indent=4)
     print(f"{room}에 대한 설명과 코드가 {output_file}에 저장되었습니다.")

@@ -71,7 +71,7 @@ def visualize_room_layout(boxes_parsed_data, folder):
     ax.invert_yaxis()
     plt.show()
 
-def generate_text_description(scene_type, objects_info):
+def generate_text_description(scene_type, objects_info, case_count=10):
     """
     방 정보와 오브젝트 정보를 바탕으로 영어 텍스트 설명을 생성합니다.
     
@@ -79,24 +79,45 @@ def generate_text_description(scene_type, objects_info):
     :param objects_info: 오브젝트 정보 리스트 (각 오브젝트는 'super-category'와 'chatgpt_caption' 키를 포함해야 함)
     :return: 생성된 영어 텍스트 설명
     """
-    description = f"This space is a <{scene_type}>. "
-    
-    # 오브젝트 정보를 카테고리별로 그룹화
-    grouped_objects = {}
-    for obj in objects_info:
-        category = obj['category']
-        if category not in grouped_objects:
-            grouped_objects[category] = []
-        grouped_objects[category].append(obj)
-    
-    # 각 카테고리에서 랜덤하게 오브젝트를 선택하여 설명에 추가
-    for category, objects in grouped_objects.items():
-        obj = random.choice(objects)
-        description += f"There is a <{category}> that [{obj['chatgpt_caption']}]. "
-    
-    return description.strip()
+    descriptions = []
+    objects_info = objects_info.copy()
 
-def layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=True):
+    for i in range(case_count):
+        description = f"This space is a <{scene_type}>. "
+        random.shuffle(objects_info)
+        for obj in objects_info:
+            description += f"There is a <{obj['category']}> that [{obj['chatgpt_caption']}]. "
+        descriptions.append(description)
+        
+    return descriptions
+
+def random_order_codes(objects):
+    random.shuffle(objects)
+
+    generated_code = "<rects>\n"
+    for object in objects:
+        generated_code += f"  <rect object-category='{object['object-category']}' object-caption='{object['object-caption']}' x='{object['x']}' y='{object['y']}' width='{object['width']}' height='{object['height']}' direction='{object['direction']}' />\n"
+    generated_code += "</rects>"
+    without_margin_code = generated_code
+
+    # Generate numerical margin code representation
+    generated_code = "<rects>\n"
+    for object in objects:
+        generated_code += f"  <rect object-category='{object['object-category']}' object-caption='{object['object-caption']}' x='{object['x']}' y='{object['y']}' width='{object['width']}' height='{object['height']}' direction='{object['direction']}' margin-top='{object['margin-top'][1]}'  margin-right='{object['margin-right'][1]}'  margin-bottom='{object['margin-bottom'][1]}'  margin-left='{object['margin-left'][1]}' />\n"
+    generated_code += "</rects>"
+    numerical_margin_code = generated_code
+
+    # Generate discrete margin code representation
+    generated_code = "<rects>\n"
+    for object in objects:
+        generated_code += f"  <rect object-category='{object['object-category']}' object-caption='{object['object-caption']}' x='{object['x']}' y='{object['y']}' width='{object['width']}' height='{object['height']}' direction='{object['direction']}' margin-top='{object['margin-top'][0]}'  margin-right='{object['margin-right'][0]}'  margin-bottom='{object['margin-bottom'][0]}'  margin-left='{object['margin-left'][0]}' />\n"
+    generated_code += "</rects>"
+    discrete_margin_code = generated_code
+
+    return without_margin_code, numerical_margin_code, discrete_margin_code
+
+
+def layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=True, case_count=10):
     """
     Converts layout data into code representation based on the specified rules.
     
@@ -276,25 +297,12 @@ def layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=Tru
         plt.show()
 
     # Generate without margin code representation
-    generated_code = "<rects>\n"
-    for object in objects:
-        generated_code += f"  <rect object-category='{object['object-category']}' object-caption='{object['object-caption']}' x='{object['x']}' y='{object['y']}' width='{object['width']}' height='{object['height']}' direction='{object['direction']}' />\n"
-    generated_code += "</rects>"
-    without_margin_code = generated_code
-
-    # Generate numerical margin code representation
-    generated_code = "<rects>\n"
-    for object in objects:
-        generated_code += f"  <rect object-category='{object['object-category']}' object-caption='{object['object-caption']}' x='{object['x']}' y='{object['y']}' width='{object['width']}' height='{object['height']}' direction='{object['direction']}' margin-top='{object['margin-top'][1]}'  margin-right='{object['margin-right'][1]}'  margin-bottom='{object['margin-bottom'][1]}'  margin-left='{object['margin-left'][1]}' />\n"
-    generated_code += "</rects>"
-    numerical_margin_code = generated_code
-
-    # Generate discrete margin code representation
-    generated_code = "<rects>\n"
-    for object in objects:
-        generated_code += f"  <rect object-category='{object['object-category']}' object-caption='{object['object-caption']}' x='{object['x']}' y='{object['y']}' width='{object['width']}' height='{object['height']}' direction='{object['direction']}' margin-top='{object['margin-top'][0]}'  margin-right='{object['margin-right'][0]}'  margin-bottom='{object['margin-bottom'][0]}'  margin-left='{object['margin-left'][0]}' />\n"
-    generated_code += "</rects>"
-    discrete_margin_code = generated_code
+    without_margin_codes, numerical_margin_codes, discrete_margin_codes = [], [], []
+    for i in range(case_count):
+        without_margin_code, numerical_margin_code, discrete_margin_code = random_order_codes(objects=objects.copy())
+        without_margin_codes.append(without_margin_code)
+        numerical_margin_codes.append(numerical_margin_code)
+        discrete_margin_codes.append(discrete_margin_code)
 
     if debug:
         print("마진 없는 코드:")
@@ -305,4 +313,4 @@ def layout_to_code(boxes_parsed_data, models_info_parsed_data, folder, debug=Tru
         print(discrete_margin_code)
         print()
 
-    return discrete_margin_code, is_overlap
+    return without_margin_codes, numerical_margin_codes, discrete_margin_codes, is_overlap

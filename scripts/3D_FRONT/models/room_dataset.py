@@ -29,9 +29,9 @@ def load_json_dataset(json_file, split):
 
     eval_length = int(len(data)/20)
     if split == "train":
-        return data[eval_length:]
+        return data[:-eval_length]
     else:
-        return data[:eval_length]
+        return data[-eval_length:]
 
 def get_custom_dataset(dataset_config, tokenizer, split):
     # JSON 파일 로드
