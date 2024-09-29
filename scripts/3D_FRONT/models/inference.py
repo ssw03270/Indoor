@@ -49,11 +49,7 @@ def load_json_dataset(json_file, split="validation"):
         dialog_data.append({"role": "user", "content": f"{B_INST} {instruction} {E_INST} {input_text}"})
         gt_data.append({"role": "assistant", "content": output_text})
 
-    eval_length = int(len(data)/20)
-    if split == "train":
-        return dialog_data[eval_length:], gt_data[eval_length:]
-    else:
-        return dialog_data[:eval_length], gt_data[:eval_length]
+    return dialog_data, gt_data
 
 def main(
     model_name,
@@ -90,7 +86,7 @@ def main(
         print("No user prompt provided. Exiting.")
         sys.exit(1)
 
-    print(f"User dialogs:\n{dialogs}")
+    # print(f"User dialogs:\n{dialogs}")
     print("\n==================================\n")
 
 
