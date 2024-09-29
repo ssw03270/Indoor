@@ -10,7 +10,6 @@ import json
 
 from tqdm import tqdm
 
-import torch.nn as nn
 import torch
 from transformers import LlamaTokenizer
 
@@ -73,7 +72,6 @@ def main(
     enable_saleforce_content_safety: bool=False, # Enable safety check woth Saleforce safety flan t5
     use_fast_kernels: bool = False, # Enable using SDPA from PyTorch Accelerated Transformers, make use Flash Attention and Xformer memory-efficient kernels
     batch_size: int = 4,  # 배치 크기 추가
-    local_rank: int = -1,  # local_rank 매개변수 추가
     **kwargs
 ):
     if prompt_file is not None:
@@ -93,26 +91,23 @@ def main(
     print("\n==================================\n")
 
 
-    # GPU 사용 가능 여부 확인 및 사용 가능한 GPU 수 파악
-    if local_rank == -1:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    else:
-        torch.cuda.set_device(local_rank)
-        device = torch.device(f'cuda:{local_rank}')
-    num_gpus = torch.cuda.device_count()
-    print(f"사용 가능한 GPU 수: {num_gpus}")
-
     # Set the seeds for reproducibility
     torch.cuda.manual_seed(seed)
     torch.manual_seed(seed)
     model = load_model(model_name, quantization, use_fast_kernels=False)
     if peft_model:
         model = load_peft_model(model, peft_model)
-    
-    # 모델을 여러 GPU에 분산
-    if num_gpus > 1:
-        model = nn.DataParallel(model)
-    model.to(device)
+    if use_fast_kernels:
+        """
+        Setting 'use_fast_kernels' will enable
+        using of Flash Attention or Xformer memory-efficient kernels 
+        based on the hardware being used. This would speed up inference when used for batched inputs.
+        """
+        try:
+            from optimum.bettertransformer import BetterTransformer
+            model = BetterTransformer.transform(model)   
+        except ImportError:
+            print("Module 'optimum' not found. Please install 'optimum' it before proceeding.")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.add_special_tokens(
@@ -132,13 +127,10 @@ def main(
             max_length = max(len(chat) for chat in batch_chats)
             padded_chats = [chat + [tokenizer.pad_token_id] * (max_length - len(chat)) for chat in batch_chats]
             
-            tokens = torch.tensor(padded_chats).long().to(device)
-            
-            # DataParallel을 사용할 경우 model.module을 사용
-            generate_func = model.module.generate if isinstance(model, nn.DataParallel) else model.generate
+            tokens = torch.tensor(padded_chats).long().to("cuda:0")
             
             # 배치 단위로 생성
-            outputs = generate_func(
+            outputs = model.generate(
                 input_ids=tokens,
                 max_new_tokens=max_new_tokens,
                 do_sample=do_sample,
@@ -157,7 +149,6 @@ def main(
                 outputs_list.append(output_text)
                 print(f"Model output:\n{output_text}")
                 print("\n==================================\n")
-                
     result = []
     for dialog, output in zip(dialogs, outputs_list):
         result.append({
