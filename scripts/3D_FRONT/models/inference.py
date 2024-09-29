@@ -121,7 +121,7 @@ def main(
     )
     
     chats = tokenize_dialog(dialogs, tokenizer)
-    outputs = []
+    outputs_list = []
     with torch.no_grad():
         for idx, chat in tqdm(enumerate(chats), total=len(chats), desc="처리 중"):
             safety_checker = get_safety_checker(enable_azure_content_safety,
@@ -176,10 +176,10 @@ def main(
                         print(method)
                         print(report)
             
-            outputs.append(output_text)
-            
+            outputs_list.append(output_text)
+
     result = []
-    for dialog, output in zip(dialogs, outputs):
+    for dialog, output in zip(dialogs, outputs_list):
         result.append({
             "input": dialog["content"],
             "output": output
