@@ -185,9 +185,13 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
     device = accelerator.device
 
     test_dir = os.path.join(config.output_dir, "samples", f"epoch_{epoch:03d}")
-    os.makedirs(test_dir, exist_ok=True)
+    if accelerator.is_main_process:
+        os.makedirs(test_dir, exist_ok=True)
 
     idx = 0  # Initialize sample index
+
+    # **DataLoader를 prepare**
+    val_dataloader = accelerator.prepare(val_dataloader)
 
     total_samples = len(val_dataloader.dataset)
     progress_bar = tqdm(total=total_samples, desc="Evaluating", disable=not accelerator.is_local_main_process)
@@ -200,10 +204,12 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
             image_conditions_batch = batch['image_condition'].to(device)
             text_conditions = batch['text_condition']
 
+            # **각 프로세스에서 배치 처리**
             for i in range(batch_size):
                 scene_id = scene_ids[i] if isinstance(scene_ids, list) else scene_ids[i].item()
                 save_dir = os.path.join(test_dir, f"{scene_id}")
-                os.makedirs(save_dir, exist_ok=True)
+                if accelerator.is_main_process:
+                    os.makedirs(save_dir, exist_ok=True)
 
                 clean_image = clean_images_batch[i:i+1]
                 image_condition = image_conditions_batch[i:i+1]
@@ -267,12 +273,13 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
                 img_condition = img_condition.transpose(0, 2, 3, 1)
                 img_condition = Image.fromarray((img_condition.squeeze() * 255).astype(np.uint8))
 
-                # Save the images and condition immediately
-                generated_image.save(os.path.join(save_dir, f"generated_{idx:04d}.png"))
-                gt_image.save(os.path.join(save_dir, f"ground_truth_{idx:04d}.png"))
-                img_condition.save(os.path.join(save_dir, f"image_condition_{idx:04d}.png"))
-                with open(os.path.join(save_dir, f"text_condition_{idx:04d}.txt"), 'w', encoding='utf-8') as f:
-                    f.write(text_condition[0])
+                # **메인 프로세스에서만 결과 저장**
+                if accelerator.is_main_process:
+                    generated_image.save(os.path.join(save_dir, f"generated_{idx:04d}.png"))
+                    gt_image.save(os.path.join(save_dir, f"ground_truth_{idx:04d}.png"))
+                    img_condition.save(os.path.join(save_dir, f"image_condition_{idx:04d}.png"))
+                    with open(os.path.join(save_dir, f"text_condition_{idx:04d}.txt"), 'w', encoding='utf-8') as f:
+                        f.write(text_condition[0])
 
                 idx += 1
                 progress_bar.update(1)
@@ -351,14 +358,21 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
         if accelerator.is_main_process:
             progress_bar.close()
 
+        # **동기화 추가**
+        accelerator.wait_for_everyone()
+
         # After each epoch, optionally sample some demo images with evaluate() and save the model
-        if accelerator.is_main_process:
-            if (epoch + 1) % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
-                evaluate(
-                    config, epoch, accelerator.unwrap_model(model), tokenizer, text_encoder, accelerator,
-                    val_dataloader, noise_scheduler_1000, noise_scheduler_50
-                )
-            if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
+        if (epoch + 1) % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
+            evaluate(
+                config, epoch, accelerator.unwrap_model(model), tokenizer, text_encoder, accelerator,
+                val_dataloader, noise_scheduler_1000, noise_scheduler_50
+            )
+
+        # **동기화 추가**
+        accelerator.wait_for_everyone()
+
+        if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
+            if accelerator.is_main_process:
                 if config.push_to_hub:
                     repo.push_to_hub(commit_message=f"Epoch {epoch}", blocking=True)
                 else:
