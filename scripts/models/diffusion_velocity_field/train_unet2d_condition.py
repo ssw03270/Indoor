@@ -2,25 +2,21 @@
 
 import os
 import pickle
-
+import argparse
 from dataclasses import dataclass
 from datasets import Dataset
-
 import numpy as np
 import torch
-
-from diffusers import DDPMScheduler
-from PIL import Image
 import torch.nn.functional as F
-
+from diffusers import DDPMScheduler, UNet2DConditionModel
+from PIL import Image
+from transformers import CLIPTextModel, AutoTokenizer
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from huggingface_hub import HfFolder, Repository, whoami
-
 from tqdm.auto import tqdm
 from pathlib import Path
-
-import argparse  # Import argparse for command-line argument parsing
+from diffusers.optimization import get_cosine_schedule_with_warmup
 
 def load_local_pkl_files(file_dir):
     data = []
@@ -101,12 +97,9 @@ def main():
 
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False)
 
-    from transformers import CLIPTextModel, AutoTokenizer
-
+    # Load tokenizer and text encoder
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
     tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
-
-    from diffusers import UNet2DConditionModel
 
     # Update in_channels to 5 (2 channels for 'gt_velocity_field' + 3 channels for 'image_condition')
     model = UNet2DConditionModel(
@@ -131,13 +124,10 @@ def main():
         cross_attention_dim=512  # set this to match the text encoder's hidden size
     )
 
-    noise_scheduler_1000 = DDPMScheduler(num_train_timesteps=1000)
-    noise_scheduler_50 = DDPMScheduler(num_train_timesteps=50)
-
+    # Use only the 1000-step noise scheduler
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
-
-    from diffusers.optimization import get_cosine_schedule_with_warmup
 
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
@@ -166,7 +156,7 @@ def main():
 
     # Start training
     train_loop(
-        config, model, noise_scheduler_1000, noise_scheduler_50, optimizer,
+        config, model, noise_scheduler, optimizer,
         train_dataloader, val_dataloader, lr_scheduler, tokenizer, text_encoder, accelerator
     )
 
@@ -179,8 +169,7 @@ def get_full_repo_name(model_id: str, organization: str = None, token: str = Non
     else:
         return f"{organization}/{model_id}"
 
-def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dataloader,
-             noise_scheduler_1000, noise_scheduler_50):
+def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dataloader, noise_scheduler):
     model.eval()
     device = accelerator.device
 
@@ -190,7 +179,7 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
 
     idx = 0  # Initialize sample index
 
-    # **DataLoader를 prepare**
+    # Prepare DataLoader
     val_dataloader = accelerator.prepare(val_dataloader)
 
     total_samples = len(val_dataloader.dataset)
@@ -204,7 +193,7 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
             image_conditions_batch = batch['image_condition'].to(device)
             text_conditions = batch['text_condition']
 
-            # **각 프로세스에서 배치 처리**
+            # Each process handles its portion of the batch
             for i in range(batch_size):
                 scene_id = scene_ids[i] if isinstance(scene_ids, list) else scene_ids[i].item()
                 save_dir = os.path.join(test_dir, f"{scene_id}")
@@ -232,12 +221,7 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
                     generator=generator,
                 ).to(device)
 
-                # Select the appropriate noise scheduler
-                if idx < 10:
-                    noise_scheduler = noise_scheduler_1000
-                else:
-                    noise_scheduler = noise_scheduler_50
-
+                # Set timesteps for the noise scheduler
                 noise_scheduler.set_timesteps(noise_scheduler.num_train_timesteps)
                 timesteps = noise_scheduler.timesteps
 
@@ -273,7 +257,7 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
                 img_condition = img_condition.transpose(0, 2, 3, 1)
                 img_condition = Image.fromarray((img_condition.squeeze() * 255).astype(np.uint8))
 
-                # **메인 프로세스에서만 결과 저장**
+                # Save the images and condition (main process only)
                 if accelerator.is_main_process:
                     generated_image.save(os.path.join(save_dir, f"generated_{idx:04d}.png"))
                     gt_image.save(os.path.join(save_dir, f"ground_truth_{idx:04d}.png"))
@@ -286,11 +270,8 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
 
     progress_bar.close()
 
-def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimizer,
+def train_loop(config, model, noise_scheduler, optimizer,
                train_dataloader, val_dataloader, lr_scheduler, tokenizer, text_encoder, accelerator):
-    from huggingface_hub import HfFolder, Repository, whoami
-    from pathlib import Path
-
     if accelerator.is_main_process:
         if config.push_to_hub:
             repo_name = get_full_repo_name(Path(config.output_dir).name)
@@ -317,11 +298,10 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
             bs = clean_images.shape[0]
 
             # Sample a random timestep for each image
-            timesteps = torch.randint(0, noise_scheduler_1000.num_train_timesteps, (bs,), device=clean_images.device).long()
+            timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (bs,), device=clean_images.device).long()
 
-            # Add noise to the clean images according to the noise magnitude at each timestep
-            # (this is the forward diffusion process)
-            noisy_images = noise_scheduler_1000.add_noise(clean_images, noise, timesteps)
+            # Add noise to the clean images (forward diffusion process)
+            noisy_images = noise_scheduler.add_noise(clean_images, noise, timesteps)
 
             # Concatenate 'noisy_images' and 'image_condition' along the channel dimension
             combined_input = torch.cat([noisy_images, image_condition], dim=1)  # shape (bs, 5, H, W)
@@ -358,17 +338,17 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
         if accelerator.is_main_process:
             progress_bar.close()
 
-        # **동기화 추가**
+        # Synchronize processes
         accelerator.wait_for_everyone()
 
         # After each epoch, optionally sample some demo images with evaluate() and save the model
         if (epoch + 1) % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
             evaluate(
                 config, epoch, accelerator.unwrap_model(model), tokenizer, text_encoder, accelerator,
-                val_dataloader, noise_scheduler_1000, noise_scheduler_50
+                val_dataloader, noise_scheduler
             )
 
-        # **동기화 추가**
+        # Synchronize processes
         accelerator.wait_for_everyone()
 
         if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
