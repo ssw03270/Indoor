@@ -8,9 +8,29 @@ from matplotlib.patches import Polygon as MplPolygon
 import re
 
 # Parse rect data from XML
+# def parse_rect_data(xml_string):
+#     rects = []
+#     pattern = r"<object\s+category='([^']+)'\s+center-x=(\d+\.?\d*)m\s+center-y=(\d+\.?\d*)m\s+center-z=(\d+\.?\d*)m\s+width=(\d+\.?\d*)m\s+height=(\d+\.?\d*)m\s+depth=(\d+\.?\d*)m\s+orientation=(-?\d+\.?\d*)degrees/>"
+    
+#     matches = re.findall(pattern, xml_string)
+    
+#     for match in matches:
+#         rect = {
+#             'category': match[0],
+#             'x': float(match[1]),
+#             'y': float(match[2]),
+#             'z': float(match[3]),
+#             'width': float(match[4]),
+#             'height': float(match[5]),
+#             'depth': float(match[6]),
+#             'orientation': float(match[7])
+#         }
+#         rects.append(rect)
+#     return rects
+    
 def parse_rect_data(xml_string):
     rects = []
-    pattern = r"<object\s+category='([^']+)'\s+center-x=(\d+\.?\d*)m\s+center-y=(\d+\.?\d*)m\s+center-z=(\d+\.?\d*)m\s+width=(\d+\.?\d*)m\s+height=(\d+\.?\d*)m\s+depth=(\d+\.?\d*)m\s+orientation=(-?\d+\.?\d*)degrees/>"
+    pattern = r"<object\s+category='([^']+)'\s+center-x=(\d+\.?\d*)m\s+center-y=(\d+\.?\d*)m\s+center-z=(\d+\.?\d*)m\s+width=(\d+\.?\d*)m\s+height=(\d+\.?\d*)m\s+depth=(\d+\.?\d*)m\s+orientation=(-?\d+\.?\d*)degrees\s+margin-backward=(\w+)\s+margin-right=(\w+)\s+margin-forward=(\w+)\s+margin-left=(\w+)/>"
     
     matches = re.findall(pattern, xml_string)
     
@@ -23,7 +43,11 @@ def parse_rect_data(xml_string):
             'width': float(match[4]),
             'height': float(match[5]),
             'depth': float(match[6]),
-            'orientation': float(match[7])
+            'orientation': float(match[7]),
+            'margin_backward': match[8],
+            'margin_right': match[9],
+            'margin_forward': match[10],
+            'margin_left': match[11]
         }
         rects.append(rect)
     return rects
@@ -84,10 +108,8 @@ def visualize_room_and_objects_shapely(room_data, object_data, scene_id = ""):
             (obj['width'] / 2, obj['depth'] / 2),
             (-obj['width'] / 2, obj['depth'] / 2)
         ])
-
         # Shapely로 회전 적용 (degree 단위)
         rotated_rect = rotate(rect, obj['orientation'], use_radians=False)
-
         # Shapely로 이동 적용 (center를 기준으로 이동)
         moved_rect = translate(rotated_rect, xoff=obj['x'], yoff=obj['z'])
 
@@ -120,27 +142,9 @@ def visualize_room_and_objects_shapely(room_data, object_data, scene_id = ""):
     plt.savefig(f'room_layout_{scene_id}.png')
     plt.close()  # 메모리 관리를 위해 figure를 닫습니다
 
-output_file_path = "C:/Users/ttd85/Documents/Resources/IndoorSceneSynthesis/LayoutGPT/inference_results.json"
-with open(output_file_path, "r") as file:
+output_file_path = "C:/Users/ttd85/Documents/Resources/IndoorSceneSynthesis/LayoutGPT/Outputs/discrete_margin_outputs/inference_results.json"
+with open(output_file_path, "r", encoding="utf-8") as file:
     data = json.load(file)
-    
-example = """
-[INST] [INST]
-The XZ plane represents the floor, and the Y axis represents the height.
-The width refers to the length extending left and right along the X axis.
-The height refers to the length extending up and down along the Y axis.
-The depth refers to the length extending forward and backward along the Z axis.
-Generate a room layout based on the given room requirements.
- [/INST] <room category=bedroom center-x=1.86m center-z=1.11m width=3.72m depth=2.21m/> [/INST]<objects>
- <object category='double_bed' center-x=1.58m center-y=0.43m center-z=1.08m width=1.88m height=0.86m depth=2.15m orientation=0degrees/>
- <object category='pendant_lamp' center-x=1.68m center-y=2.39m center-z=1.16m width=1.01m height=0.89m depth=1.02m orientation=0degrees/>
- <object category='wardrobe' center-x=3.32m center-y=1.21m center-z=0.90m width=1.71m height=2.43m depth=0.60m orientation=-90degrees/>
- <object category='dressing_table' center-x=0.39m center-y=0.71m center-z=0.18m width=1.05m height=1.41m depth=0.60m orientation=0degrees/>
- <object category='armchair' center-x=0.67m center-y=0.46m center-z=1.86m width=0.60m height=0.92m depth=0.57m orientation=90degrees/>
- <object category='desk' center-x=1.35m center-y=0.36m center-z=1.82m width=3.10m height=0.71m depth=0.87m orientation=-180degrees/>
- <object category='floor_lamp' center-x=2.51m center-y=0.79m center-z=2.06m width=0.47m height=1.58m depth=0.49m orientation=19degrees/>
- </objects>
-"""
 
 for idx, _data in enumerate(data):
     room, rects = parse_example(_data['output'])
