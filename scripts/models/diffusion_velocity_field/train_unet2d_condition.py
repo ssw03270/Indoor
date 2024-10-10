@@ -1,9 +1,26 @@
+# accelerate launch --num_processes 1  scripts/models/diffusion_velocity_field/train_unet2d_condition.py --train_data_dir "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/train" --val_data_dir "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/val"
+
 import os
 import pickle
+
 from dataclasses import dataclass
 from datasets import Dataset
+
 import numpy as np
 import torch
+
+from diffusers import DDPMScheduler
+from PIL import Image
+import torch.nn.functional as F
+
+from accelerate import Accelerator
+from accelerate.utils import set_seed
+from huggingface_hub import HfFolder, Repository, whoami
+
+from tqdm.auto import tqdm
+from pathlib import Path
+
+import argparse  # Import argparse for command-line argument parsing
 
 def load_local_pkl_files(file_dir):
     data = []
@@ -54,74 +71,111 @@ class TrainingConfig:
 
     push_to_hub = False  # Set to False if not pushing to Hugging Face Hub
     hub_private_repo = False  
-    overwrite_output_dir = True  # overwrite the old model when re-running the notebook
+    overwrite_output_dir = True  # overwrite the old model when re-running the script
     seed = 0
 
-config = TrainingConfig()
+def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Train a diffusion model.')
+    parser.add_argument('--train_data_dir', type=str, required=True, help='Path to the training data directory.')
+    parser.add_argument('--val_data_dir', type=str, required=True, help='Path to the validation data directory.')
+    args = parser.parse_args()
 
-# Local dataset load path for training
-train_data_dir = "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/train"
+    config = TrainingConfig()
 
-# Load training dataset
-train_dataset = load_custom_dataset(train_data_dir)
-train_dataset.set_format(type='torch')
+    # Local dataset load path for training
+    train_data_dir = args.train_data_dir
 
-train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=config.train_batch_size, shuffle=True)
+    # Load training dataset
+    train_dataset = load_custom_dataset(train_data_dir)
+    train_dataset.set_format(type='torch')
 
-# Load validation dataset
-val_data_dir = "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/val"
-val_dataset = load_custom_dataset(val_data_dir)
-val_dataset.set_format(type='torch')
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=config.train_batch_size, shuffle=True)
 
-val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=config.eval_batch_size, shuffle=False)
+    # Load validation dataset
+    val_data_dir = args.val_data_dir
+    val_dataset = load_custom_dataset(val_data_dir)
+    val_dataset.set_format(type='torch')
 
-from transformers import CLIPTextModel, AutoTokenizer
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=config.eval_batch_size, shuffle=False)
 
-text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
-tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+    from transformers import CLIPTextModel, AutoTokenizer
 
-from diffusers import UNet2DConditionModel
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
+    tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
-# Update in_channels to 5 (2 channels for 'gt_velocity_field' + 3 channels for 'image_condition')
-model = UNet2DConditionModel(
-    sample_size=config.image_size,  # the target image resolution
-    in_channels=5,  # Updated from 2 to 5
-    out_channels=2,  # the number of output channels
-    layers_per_block=2,  # how many ResNet layers to use per UNet block
-    block_out_channels=(160, 320, 640, 640),  # the number of output channels for each downsampling block
-    down_block_types=( 
-        "CrossAttnDownBlock2D", 
-        "CrossAttnDownBlock2D", 
-        "CrossAttnDownBlock2D", 
-        "DownBlock2D"
-    ),
-    up_block_types=(
-        "UpBlock2D",
-        "CrossAttnUpBlock2D",  
-        "CrossAttnUpBlock2D", 
-        "CrossAttnUpBlock2D"
-    ),
-    norm_num_groups=32,  # normalization groups set to 32
-    cross_attention_dim=512  # set this to match the text encoder's hidden size
-)
+    from diffusers import UNet2DConditionModel
 
-from diffusers import DDPMScheduler
+    # Update in_channels to 5 (2 channels for 'gt_velocity_field' + 3 channels for 'image_condition')
+    model = UNet2DConditionModel(
+        sample_size=config.image_size,  # the target image resolution
+        in_channels=5,  # Updated from 2 to 5
+        out_channels=2,  # the number of output channels
+        layers_per_block=2,  # how many ResNet layers to use per UNet block
+        block_out_channels=(160, 320, 640, 640),  # the number of output channels for each downsampling block
+        down_block_types=( 
+            "CrossAttnDownBlock2D", 
+            "CrossAttnDownBlock2D", 
+            "CrossAttnDownBlock2D", 
+            "DownBlock2D"
+        ),
+        up_block_types=(
+            "UpBlock2D",
+            "CrossAttnUpBlock2D",  
+            "CrossAttnUpBlock2D", 
+            "CrossAttnUpBlock2D"
+        ),
+        norm_num_groups=32,  # normalization groups set to 32
+        cross_attention_dim=512  # set this to match the text encoder's hidden size
+    )
 
-noise_scheduler_1000 = DDPMScheduler(num_train_timesteps=1000)
-noise_scheduler_50 = DDPMScheduler(num_train_timesteps=50)
+    noise_scheduler_1000 = DDPMScheduler(num_train_timesteps=1000)
+    noise_scheduler_50 = DDPMScheduler(num_train_timesteps=50)
 
-from PIL import Image
-import torch.nn.functional as F
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
-from diffusers.optimization import get_cosine_schedule_with_warmup
+    from diffusers.optimization import get_cosine_schedule_with_warmup
 
-lr_scheduler = get_cosine_schedule_with_warmup(
-    optimizer=optimizer,
-    num_warmup_steps=config.lr_warmup_steps,
-    num_training_steps=(len(train_dataloader) * config.num_epochs),
-)
+    lr_scheduler = get_cosine_schedule_with_warmup(
+        optimizer=optimizer,
+        num_warmup_steps=config.lr_warmup_steps,
+        num_training_steps=(len(train_dataloader) * config.num_epochs),
+    )
+   
+    # Initialize accelerator and tensorboard logging
+    accelerator = Accelerator(
+        mixed_precision=config.mixed_precision,
+        gradient_accumulation_steps=config.gradient_accumulation_steps,
+        log_with="tensorboard",
+        project_dir=os.path.join(config.output_dir, "logs")
+    )
+
+    # Set random seed for reproducibility
+    set_seed(config.seed)
+
+    # Prepare everything
+    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, lr_scheduler
+    )
+
+    text_encoder = accelerator.prepare(text_encoder)
+    text_encoder.requires_grad_(False)
+
+    # Start training
+    train_loop(
+        config, model, noise_scheduler_1000, noise_scheduler_50, optimizer,
+        train_dataloader, val_dataloader, lr_scheduler, tokenizer, text_encoder, accelerator
+    )
+
+def get_full_repo_name(model_id: str, organization: str = None, token: str = None):
+    if token is None:
+        token = HfFolder.get_token()
+    if organization is None:
+        username = whoami(token)["name"]
+        return f"{username}/{model_id}"
+    else:
+        return f"{organization}/{model_id}"
 
 def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dataloader,
              noise_scheduler_1000, noise_scheduler_50):
@@ -223,29 +277,11 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
 
     progress_bar.close()
 
-from accelerate import Accelerator
-from huggingface_hub import HfFolder, Repository, whoami
+def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimizer,
+               train_dataloader, val_dataloader, lr_scheduler, tokenizer, text_encoder, accelerator):
+    from huggingface_hub import HfFolder, Repository, whoami
+    from pathlib import Path
 
-from tqdm.auto import tqdm
-from pathlib import Path
-
-def get_full_repo_name(model_id: str, organization: str = None, token: str = None):
-    if token is None:
-        token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
-        return f"{organization}/{model_id}"
-
-def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimizer, train_dataloader, val_dataloader, lr_scheduler, tokenizer, text_encoder):
-    # Initialize accelerator and tensorboard logging
-    accelerator = Accelerator(
-        mixed_precision=config.mixed_precision,
-        gradient_accumulation_steps=config.gradient_accumulation_steps, 
-        log_with="tensorboard",
-        project_dir=os.path.join(config.output_dir, "logs")
-    )
     if accelerator.is_main_process:
         if config.push_to_hub:
             repo_name = get_full_repo_name(Path(config.output_dir).name)
@@ -253,22 +289,15 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
         elif config.output_dir is not None:
             os.makedirs(config.output_dir, exist_ok=True)
         accelerator.init_trackers("train_example")
-    
-    # Prepare everything
-    model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, lr_scheduler
-    )
 
-    text_encoder.to(accelerator.device)
-    text_encoder.requires_grad_(False)
-    
     global_step = 0
 
-    # Now you train the model
     for epoch in range(config.num_epochs):
         model.train()
-        progress_bar = tqdm(total=len(train_dataloader), disable=not accelerator.is_local_main_process)
-        progress_bar.set_description(f"Epoch {epoch}")
+        if accelerator.is_main_process:
+            progress_bar = tqdm(total=len(train_dataloader), desc=f"Epoch {epoch}")
+        else:
+            progress_bar = None
 
         for step, batch in enumerate(train_dataloader):
             clean_images = batch['gt_velocity_field'].to(accelerator.device)
@@ -309,17 +338,19 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
                 lr_scheduler.step()
                 optimizer.zero_grad()
             
-            progress_bar.update(1)
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0], "step": global_step}
-            progress_bar.set_postfix(**logs)
-            accelerator.log(logs, step=global_step)
+            if accelerator.is_main_process:
+                progress_bar.update(1)
+                logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0], "step": global_step}
+                progress_bar.set_postfix(**logs)
+                accelerator.log(logs, step=global_step)
+
             global_step += 1
 
-        progress_bar.close()
+        if accelerator.is_main_process:
+            progress_bar.close()
 
         # After each epoch, optionally sample some demo images with evaluate() and save the model
         if accelerator.is_main_process:
-
             if (epoch + 1) % config.save_image_epochs == 0 or epoch == config.num_epochs - 1:
                 evaluate(
                     config, epoch, accelerator.unwrap_model(model), tokenizer, text_encoder, accelerator,
@@ -333,8 +364,5 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
                     model.save_pretrained(config.output_dir)
                     tokenizer.save_pretrained(config.output_dir)
 
-from accelerate import notebook_launcher
-args = (config, model, noise_scheduler_1000, noise_scheduler_50, optimizer, train_dataloader, val_dataloader, lr_scheduler, tokenizer, text_encoder)
-notebook_launcher(train_loop, args, num_processes=1)
-
-# Note: Visualization code is omitted since images are saved individually.
+if __name__ == "__main__":
+    main()
