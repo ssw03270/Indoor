@@ -377,7 +377,7 @@ def train_loop(config, model, noise_scheduler_1000, noise_scheduler_50, optimize
                     repo.push_to_hub(commit_message=f"Epoch {epoch}", blocking=True)
                 else:
                     # Save the model
-                    model.save_pretrained(config.output_dir)
+                    accelerator.unwrap_model(model).save_pretrained(config.output_dir)
                     tokenizer.save_pretrained(config.output_dir)
 
 if __name__ == "__main__":
