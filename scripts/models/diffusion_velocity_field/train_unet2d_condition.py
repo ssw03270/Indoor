@@ -58,8 +58,6 @@ def load_custom_dataset(data_dir):
 @dataclass
 class TrainingConfig:
     image_size = 64  # the generated image resolution
-    train_batch_size = 4
-    eval_batch_size = 4  # how many images to sample during evaluation
     num_epochs = 200
     gradient_accumulation_steps = 1
     learning_rate = 1e-4
@@ -79,25 +77,29 @@ def main():
     parser = argparse.ArgumentParser(description='Train a diffusion model.')
     parser.add_argument('--train_data_dir', type=str, required=True, help='Path to the training data directory.')
     parser.add_argument('--val_data_dir', type=str, required=True, help='Path to the validation data directory.')
+    parser.add_argument('--num_epochs', type=int, default=200, required=False, help='Number of training epochs.') 
+    parser.add_argument('--train_batch_size', type=int, default=4, required=False, help='Batch size for training.')  
+    parser.add_argument('--val_batch_size', type=int, default=4, required=False, help='Batch size for validation.')  
     args = parser.parse_args()
 
     config = TrainingConfig()
-
-    # Local dataset load path for training
-    train_data_dir = args.train_data_dir
+    config.num_epochs = args.num_epochs
 
     # Load training dataset
+    train_data_dir = args.train_data_dir
+    train_batch_size = args.train_batch_size
     train_dataset = load_custom_dataset(train_data_dir)
     train_dataset.set_format(type='torch')
 
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=config.train_batch_size, shuffle=True)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
 
     # Load validation dataset
     val_data_dir = args.val_data_dir
+    val_batch_size = args.val_batch_size
     val_dataset = load_custom_dataset(val_data_dir)
     val_dataset.set_format(type='torch')
 
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=config.eval_batch_size, shuffle=False)
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=val_batch_size, shuffle=False)
 
     from transformers import CLIPTextModel, AutoTokenizer
 
