@@ -268,6 +268,12 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
                 idx += 1
                 progress_bar.update(1)
 
+                if idx > 20:
+                    break
+            
+            if idx > 20:
+                break
+
     progress_bar.close()
 
 def train_loop(config, model, noise_scheduler, optimizer,
