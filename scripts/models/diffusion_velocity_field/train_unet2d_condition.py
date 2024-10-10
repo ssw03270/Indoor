@@ -239,25 +239,38 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
 
                     sample = noise_scheduler.step(noise_pred, t, sample).prev_sample
 
-                # Convert sample to image
+                # Convert sample to RGB image
                 ### 수정된 부분 시작
-                # generated_sample = sample.clamp(0, 1)
                 generated_sample = (sample / 2 + 0.5).clamp(0, 1)  # [-1,1] -> [0,1]
                 ### 수정된 부분 끝
-                generated_image = generated_sample[:, 0:1, :, :]
+                generated_image = generated_sample[:, :2, :, :]  # 두 채널을 사용 (64, 64, 2)
                 generated_image = generated_image.cpu().permute(0, 2, 3, 1).numpy()
-                generated_image = Image.fromarray((generated_image.squeeze() * 255).astype(np.uint8), mode='L')
 
-                # Apply rotation and flipping to generated_image
-                generated_image = generated_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
+                # 두 채널을 RGB로 변환 (R = 첫 채널, G = 두 번째 채널, B = 0)
+                generated_rgb_image = np.zeros((generated_image.shape[0], generated_image.shape[1], generated_image.shape[2], 3))
+                generated_rgb_image[:, :, :, 0] = generated_image[:, :, :, 0]  # R 채널에 첫 번째 채널
+                generated_rgb_image[:, :, :, 1] = generated_image[:, :, :, 1]  # G 채널에 두 번째 채널
+                # B 채널은 그대로 0 (필요시 다른 값을 넣어도 됩니다)
+
+                generated_rgb_image = Image.fromarray((generated_rgb_image.squeeze() * 255).astype(np.uint8), mode='RGB')
+
+                # Apply rotation and flipping to generated_rgb_image
+                generated_rgb_image = generated_rgb_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
 
                 # Process ground truth image
                 ### 수정된 부분 시작
                 gt_image = (clean_image / 2 + 0.5).clamp(0, 1)  # [-1,1] -> [0,1]
                 ### 수정된 부분 끝
-                gt_image = gt_image[:, 0:1, :, :].cpu().permute(0, 2, 3, 1).numpy()
-                gt_image = Image.fromarray((gt_image.squeeze() * 255).astype(np.uint8), mode='L')
-                gt_image = gt_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
+                gt_image = gt_image[:, :2, :, :].cpu().permute(0, 2, 3, 1).numpy()
+
+                # 마찬가지로 GT 이미지도 RGB로 변환
+                gt_rgb_image = np.zeros((gt_image.shape[0], gt_image.shape[1], gt_image.shape[2], 3))
+                gt_rgb_image[:, :, :, 0] = gt_image[:, :, :, 0]  # R 채널에 첫 번째 채널
+                gt_rgb_image[:, :, :, 1] = gt_image[:, :, :, 1]  # G 채널에 두 번째 채널
+                # B 채널은 그대로 0
+
+                gt_rgb_image = Image.fromarray((gt_rgb_image.squeeze() * 255).astype(np.uint8), mode='RGB')
+                gt_rgb_image = gt_rgb_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
 
                 # Convert image_condition to PIL image
                 img_condition = image_condition.cpu().numpy()
@@ -266,8 +279,8 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
 
                 # Save the images and condition (main process only)
                 if accelerator.is_main_process:
-                    generated_image.save(os.path.join(save_dir, f"generated_{idx:04d}.png"))
-                    gt_image.save(os.path.join(save_dir, f"ground_truth_{idx:04d}.png"))
+                    generated_rgb_image.save(os.path.join(save_dir, f"generated_{idx:04d}.png"))
+                    gt_rgb_image.save(os.path.join(save_dir, f"ground_truth_{idx:04d}.png"))
                     img_condition.save(os.path.join(save_dir, f"image_condition_{idx:04d}.png"))
                     with open(os.path.join(save_dir, f"text_condition_{idx:04d}.txt"), 'w', encoding='utf-8') as f:
                         f.write(text_condition[0])
