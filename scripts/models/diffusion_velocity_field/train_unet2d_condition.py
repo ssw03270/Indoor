@@ -1,4 +1,5 @@
-# accelerate launch --num_processes 1  scripts/models/diffusion_velocity_field/train_unet2d_condition.py --train_data_dir "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/train" --val_data_dir "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/val"
+# 코드 전체를 여기에 복사합니다.
+# 변경된 부분은 '### 수정된 부분 시작'과 '### 수정된 부분 끝' 주석으로 표시했습니다.
 
 import os
 import pickle
@@ -239,7 +240,10 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
                     sample = noise_scheduler.step(noise_pred, t, sample).prev_sample
 
                 # Convert sample to image
-                generated_sample = sample.clamp(0, 1)
+                ### 수정된 부분 시작
+                # generated_sample = sample.clamp(0, 1)
+                generated_sample = (sample / 2 + 0.5).clamp(0, 1)  # [-1,1] -> [0,1]
+                ### 수정된 부분 끝
                 generated_image = generated_sample[:, 0:1, :, :]
                 generated_image = generated_image.cpu().permute(0, 2, 3, 1).numpy()
                 generated_image = Image.fromarray((generated_image.squeeze() * 255).astype(np.uint8), mode='L')
@@ -248,7 +252,10 @@ def evaluate(config, epoch, model, tokenizer, text_encoder, accelerator, val_dat
                 generated_image = generated_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
 
                 # Process ground truth image
-                gt_image = clean_image[:, 0:1, :, :].cpu().permute(0, 2, 3, 1).numpy()
+                ### 수정된 부분 시작
+                gt_image = (clean_image / 2 + 0.5).clamp(0, 1)  # [-1,1] -> [0,1]
+                ### 수정된 부분 끝
+                gt_image = gt_image[:, 0:1, :, :].cpu().permute(0, 2, 3, 1).numpy()
                 gt_image = Image.fromarray((gt_image.squeeze() * 255).astype(np.uint8), mode='L')
                 gt_image = gt_image.rotate(180).transpose(Image.FLIP_LEFT_RIGHT)
 
