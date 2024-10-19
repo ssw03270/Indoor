@@ -52,7 +52,10 @@ def load_polygon(prefix, id, stats, debug=False):
     
     # 모든 다각형을 합치고 외곽선만 추출
     union = unary_union(polygons)
-    room_polygon = Polygon(union.exterior)
+    if union.geom_type == 'MultiPolygon':
+        room_polygon = max(union.geoms, key=lambda p: p.area)
+    else:
+        room_polygon = Polygon(union.exterior)
     room_centroid = room_polygon.centroid
     room_polygon = translate(room_polygon, xoff=-room_centroid.x, yoff=-room_centroid.y)
     
@@ -66,8 +69,8 @@ def load_polygon(prefix, id, stats, debug=False):
     object_polygons = []
     for label, size, angle, loc in zip(data['class_labels'], data['sizes'], data['angles'], data['translations']):
         label_idx = np.where(label)[0][0]
-        if label_idx >= len(stats['object_types']): # NOTE:
-            continue
+        # if label_idx >= len(stats['object_types']): # NOTE:
+        #     continue
         cat = stats['object_types'][label_idx]
         
         width, height, depth = size # NOTE: half the actual size
@@ -109,10 +112,12 @@ for folder_path, file_name, room in zip(folder_paths, file_names, rooms):
 
     room_data = []
     for data in tqdm(json_data):
+        split = data['split']
         scene_id = data['scene_id']
         room_info, object_infos = load_polygon(prefix=folder_path, id=scene_id, stats=stats)
 
         new_data = {
+            'split': split,
             'scene_id': scene_id,
             'room_info': room_info,
             'object_infos': data['object_infos'],

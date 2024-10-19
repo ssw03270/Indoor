@@ -17,6 +17,12 @@ np.random.seed(42)
 
 # Define global paths and room types
 VALID_FOLDER_PATH = "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes"
+bedroom_class_labels = ["armchair", "bookshelf", "cabinet", "ceiling_lamp", "chair", "children_cabinet", "coffee_table", "desk", "double_bed", "dressing_chair", "dressing_table", "kids_bed", "nightstand", "pendant_lamp", "shelf", "single_bed", "sofa", "stool", "table", "tv_stand", "wardrobe", "none"]
+diningroom_class_labels = ["armchair", "bookshelf", "cabinet", "ceiling_lamp", "chaise_longue_sofa", "chinese_chair", "coffee_table", "console_table", "corner_side_table", "desk", "dining_chair", "dining_table", "l_shaped_sofa", "lazy_sofa", "lounge_chair", "loveseat_sofa", "multi_seat_sofa", "pendant_lamp", "round_end_table", "shelf", "stool", "tv_stand", "wardrobe", "wine_cabinet", "none"]
+livingroom_class_labels = ["armchair", "bookshelf", "cabinet", "ceiling_lamp", "chaise_longue_sofa", "chinese_chair", "coffee_table", "console_table", "corner_side_table", "desk", "dining_chair", "dining_table", "l_shaped_sofa", "lazy_sofa", "lounge_chair", "loveseat_sofa", "multi_seat_sofa", "pendant_lamp", "round_end_table", "shelf", "stool", "tv_stand", "wardrobe", "wine_cabinet", "none"]
+
+class_label_list = [bedroom_class_labels, diningroom_class_labels, livingroom_class_labels]
+max_obj_count_list = [12, 21, 21]
 
 def generate_text_condition(object_infos):
     text_condition = ""
@@ -72,45 +78,73 @@ def generate_resize_image(png_file):
 
     return image
 
-def generate_data_file(pkl_files, png_files, mode="train"):
+def generate_data_file(room, pkl_files, png_files, class_labels, max_obj_count, mode="train"):
+    one_hot_dict = {label: [1 if i == idx else 0 for i in range(len(class_labels))] 
+                 for idx, label in enumerate(class_labels)}
+
     for pkl_file, png_file in zip(tqdm(pkl_files), png_files):
         data_path = os.path.join(path, pkl_file)
         image_condition = generate_resize_image(png_file)
 
         with open(data_path, 'rb') as file:
             pkl_data = pickle.load(file)
-            scene_id = pkl_data['scene_id']
-            room_info = pkl_data['room_info']
-            object_infos = pkl_data['object_infos']
-            object_transformations = pkl_data['object_transformations']
-            velocity_field = pkl_data['velocity_field']
+            
+        split = pkl_data['split']
+        if split != mode:
+            continue
 
-            text_condition = generate_text_condition(object_infos)
-            refine_velocity_field = generate_refine_velocity_field(velocity_field)
+        scene_id = pkl_data['scene_id']
+        room_info = pkl_data['room_info']
+        object_infos = pkl_data['object_infos']
+        object_transformations = pkl_data['object_transformations']
+        velocity_field = pkl_data['velocity_field']
 
-            output_path = os.path.join(VALID_FOLDER_PATH, f"{mode}")
-            os.makedirs(output_path, exist_ok=True)
+        model_ids = [object_info['model_id'] for object_info in object_infos]
+        categorys = [object_transformation['category'] for object_transformation in object_transformations]
+        locations = [object_transformation['location'] for object_transformation in object_transformations]
+        scales = [object_transformation['scale'] for object_transformation in object_transformations]
+        rotations = [object_transformation['rotation'] for object_transformation in object_transformations]
 
-            data = {
-                "scene_id": scene_id,
-                "text_condition": text_condition,
-                "image_condition": image_condition,
-                "gt_velocity_field": refine_velocity_field
-            }
-            output_file = os.path.join(VALID_FOLDER_PATH, f'{mode}/{scene_id}.pkl')
-            with open(output_file, 'wb') as pkl_file:
-                pickle.dump(data, pkl_file)
+        obj_outputs = []
+        for cat, loc, scale, rot in zip(categorys, locations, scales, rotations):
+            cat_one_hot = one_hot_dict[cat]
+            obj_output = cat_one_hot + loc + scale + [rot]
+            obj_outputs.append(obj_output)
+        
+        if len(obj_outputs) < max_obj_count:
+            obj_outputs.append(one_hot_dict['none'] + [0, 0, 0, 0, 0, 0, 0])
+
+        text_condition = generate_text_condition(object_infos)
+        refine_velocity_field = generate_refine_velocity_field(velocity_field)
+
+        output_path = os.path.join(VALID_FOLDER_PATH, f"{room}/{mode}")
+        os.makedirs(output_path, exist_ok=True)
+
+        data = {
+            "scene_id": scene_id,
+            "room_info": room_info,
+            "text_condition": text_condition,
+            "image_condition": image_condition,
+            "gt_velocity_field": refine_velocity_field,
+            "layout": obj_outputs,
+            "model_ids": model_ids,
+            "model_categorys": categorys
+        }
+        output_file = os.path.join(VALID_FOLDER_PATH, f'{room}/{mode}/{scene_id}.pkl')
+        with open(output_file, 'wb') as pkl_file:
+            pickle.dump(data, pkl_file)
 
 if __name__ == "__main__":
-    path = os.path.join(VALID_FOLDER_PATH, f'velocity_field/')
-    pkl_files = [f for f in os.listdir(path) if f.endswith('.pkl')]
-    image_condition_files = [f for f in os.listdir(path) if f.endswith('condition.png')]
+    ROOMS = ['bedroom', 'diningroom', 'livingroom']
 
-    train_pkl_files = pkl_files[:int(len(pkl_files) * 0.8)]  # 80%는 train
-    train_png_files = image_condition_files[:int(len(image_condition_files) * 0.8)]  # 80%는 train
-    val_pkl_files = pkl_files[int(len(pkl_files) * 0.8):]    # 20%는 val
-    val_png_files = image_condition_files[int(len(image_condition_files) * 0.8):]    # 20%는 val
+    for room_idx, room in enumerate(ROOMS):
+        path = os.path.join(VALID_FOLDER_PATH, f'{room}_velocity_field/')
+        pkl_files = [f for f in os.listdir(path) if f.endswith('.pkl')]
+        image_condition_files = [f for f in os.listdir(path) if f.endswith('condition.png')]
+        class_labels = class_label_list[room_idx]
+        max_obj_count = max_obj_count_list[room_idx]
 
-    generate_data_file(train_pkl_files, train_png_files, mode="train")
-    generate_data_file(val_pkl_files, val_png_files, mode="val")
-    
+        generate_data_file(room, pkl_files, image_condition_files, class_labels, max_obj_count, mode="train")
+        generate_data_file(room, pkl_files, image_condition_files, class_labels, max_obj_count, mode="test")
+        generate_data_file(room, pkl_files, image_condition_files, class_labels, max_obj_count, mode="val")
+        

@@ -148,6 +148,10 @@ def find_door_location(room_polygon, object_polygons, density_map, xx, yy, door_
     wall_densities = []
     closest_points = []
 
+    min_overlap = float('inf')
+    best_wall_point = None
+    best_closest_point = None
+
     for x, y, density in zip(xx.flatten(), yy.flatten(), density_map.flatten()):
         half_size = door_size / 2
         door_candidate = Polygon([
@@ -164,6 +168,12 @@ def find_door_location(room_polygon, object_polygons, density_map, xx, yy, door_
             is_overlap = any(door_candidate.intersects(obj_poly) for obj_poly in object_polygons)
 
             if is_overlap:
+                # overlap이 발생한 경우, overlap의 양을 계산
+                overlap_area = sum([door_candidate.intersection(obj_poly).area for obj_poly in object_polygons])
+                if overlap_area < min_overlap:  # 최소 overlap보다 작으면 업데이트
+                    min_overlap = overlap_area
+                    best_wall_point = (x, y)
+                    best_closest_point = closest_point
                 continue
 
             wall_points.append((x, y))
@@ -171,15 +181,17 @@ def find_door_location(room_polygon, object_polygons, density_map, xx, yy, door_
             closest_points.append(closest_point)
 
     if not wall_points:
-        raise ValueError("No suitable door location found. Adjust the door size or room dimensions.")
+        door_center = best_wall_point
+        closest_point = best_closest_point
 
-    # Choose the location with maximum density
-    max_density = np.max(wall_densities)
-    max_density_indices = np.where(wall_densities == max_density)[0]
-    selected_index = np.random.choice(max_density_indices)
+    else:
+        # Choose the location with maximum density
+        max_density = np.max(wall_densities)
+        max_density_indices = np.where(wall_densities == max_density)[0]
+        selected_index = np.random.choice(max_density_indices)
 
-    door_center = wall_points[selected_index]
-    closest_point = closest_points[selected_index]
+        door_center = wall_points[selected_index]
+        closest_point = closest_points[selected_index]
 
     # Create the door polygon
     half_size = door_size / 2
@@ -268,6 +280,7 @@ def get_velocity_field(room_polygon, grid_map, paths, xx, yy, scale=1):
 
 
 def visualize_room_and_grid_with_particles(
+    room,
     scene_id,
     room_polygon,
     object_polygons,
@@ -386,7 +399,7 @@ def visualize_room_and_grid_with_particles(
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
     # Create output directory
-    output_path = os.path.join(VALID_FOLDER_PATH, 'velocity_field')
+    output_path = os.path.join(VALID_FOLDER_PATH, f'{room}_velocity_field')
     os.makedirs(output_path, exist_ok=True)
 
     # Save figure with particles
@@ -426,7 +439,7 @@ def visualize_room_and_grid_with_particles(
     plt.close()
 
 
-def main(scene_id, room_polygon, object_polygons, object_height, door_size=1.0):
+def main(room, scene_id, room_polygon, object_polygons, object_height, door_size=1.0):
     """
     Main function to process each scene.
 
@@ -500,6 +513,7 @@ def main(scene_id, room_polygon, object_polygons, object_height, door_size=1.0):
 
     # Visualize results
     visualize_room_and_grid_with_particles(
+        room,
         scene_id,
         room_polygon,
         object_polygons,
@@ -536,6 +550,7 @@ if __name__ == "__main__":
             new_datas = []
 
             for data in tqdm(pkl_data):
+                split = data['split']
                 scene_id = data['scene_id']
                 room_info = data['room_info']
                 object_transformations = data['object_transformations']
@@ -548,8 +563,34 @@ if __name__ == "__main__":
                 ]
                 object_height = [obj_trans['scale'][1] for obj_trans in object_transformations]
 
+                output_file = os.path.join(VALID_FOLDER_PATH, f'{room}_velocity_field/{scene_id}.pkl')
+                # 파일이 이미 존재하는지 확인
+                if os.path.exists(output_file):
+                    with open(output_file, 'rb') as pkl_file:
+                        loaded_data = pickle.load(pkl_file)
+
+                    if split in loaded_data:
+                        continue
+
+                    add_new_data = {
+                        'split': split,
+                        'scene_id': loaded_data['scene_id'],
+                        'room_info': loaded_data['room_info'],
+                        'object_infos': loaded_data['object_infos'],
+                        'object_transformations': loaded_data['object_transformations'],
+                        'velocity_field': loaded_data['velocity_field']
+                    }
+                    
+                    # Save the new data
+                    output_file = os.path.join(VALID_FOLDER_PATH, f'{room}_velocity_field/{scene_id}.pkl')
+                    with open(output_file, 'wb') as pkl_file:
+                        pickle.dump(add_new_data, pkl_file)
+
+                    continue  # 파일이 존재하면 다음 반복으로 넘어감
+
                 # Process the scene
                 success_door, success_path, outputs = main(
+                    room=room,
                     scene_id=scene_id,
                     room_polygon=room_polygon,
                     object_polygons=object_polygons,
@@ -557,16 +598,16 @@ if __name__ == "__main__":
                     door_size=0.75
                 )
 
-                # Update counts
-                if success_door:
-                    door_success_count += 1
-                else:
-                    door_error_count += 1
+                # # Update counts
+                # if success_door:
+                #     door_success_count += 1
+                # else:
+                #     door_error_count += 1
 
-                if success_path:
-                    path_success_count += 1
-                else:
-                    path_error_count += 1
+                # if success_path:
+                #     path_success_count += 1
+                # else:
+                #     path_error_count += 1
 
                 if success_door:
                     (
@@ -590,6 +631,7 @@ if __name__ == "__main__":
                         'yy': yy,
                     }
                     add_new_data = {
+                        'split': split,
                         'scene_id': scene_id,
                         'room_info': room_info,
                         'object_infos': object_infos,
@@ -598,7 +640,7 @@ if __name__ == "__main__":
                     }
                     
                     # Save the new data
-                    output_file = os.path.join(VALID_FOLDER_PATH, f'velocity_field/{scene_id}.pkl')
+                    output_file = os.path.join(VALID_FOLDER_PATH, f'{room}_velocity_field/{scene_id}.pkl')
                     with open(output_file, 'wb') as pkl_file:
                         pickle.dump(add_new_data, pkl_file)
 

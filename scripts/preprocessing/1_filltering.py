@@ -4,23 +4,32 @@ import pickle
 import json
 import random
 from tqdm import tqdm
+import csv
 
 from utils import check_overlap
 
 folder_path = 'E:/Resources/IndoorSceneSynthesis/InstructScene'
 room_lists = ["threed_front_bedroom", "threed_front_diningroom", "threed_front_livingroom"]
-
+split_paths = ["E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/bedroom_threed_front_splits.csv",
+               "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/diningroom_threed_front_splits.csv",
+               "E:/Resources/IndoorSceneSynthesis/InstructScene/valid_scenes/livingroom_threed_front_splits.csv"]
 random.seed(42)
 np.random.seed(42)
 
-for room in room_lists:
+for room, split_path in zip(room_lists, split_paths):
     overlap_count = 0
     out_of_bound_count = 0
     error_count = 0    
     valid_scene_infos = []
 
+    obj_count_list = []
+
     path = os.path.join(folder_path, room)
-    
+    with open(split_path, mode='r', encoding='utf-8') as csvfile:  # CSV 파일 열기
+        reader = csv.reader(csvfile)
+        split_data = list(reader)
+        split_data = {item[0]: item[1] for item in split_data}
+
     # path 경로에 있는 폴더 리스트 가져오기
     folder_list = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f)) and "test" not in f and "train" not in f]
     all_folder_count = len(folder_list)
@@ -70,27 +79,35 @@ for room in room_lists:
                 
         # 방 레이아웃 시각화
         # visualize_room_layout(boxes_parsed_data, folder)
-        try:
-            is_overlap, is_out_of_bound = check_overlap(boxes_parsed_data, models_info_parsed_data, folder, debug=False, case_count=1)
-            if is_overlap:
-                overlap_count += 1
+        # try:
+        #     is_overlap, is_out_of_bound = check_overlap(boxes_parsed_data, models_info_parsed_data, folder, debug=False, case_count=1)
+        #     if is_overlap:
+        #         overlap_count += 1
             
-            if is_out_of_bound:
-                out_of_bound_count += 1
+        #     if is_out_of_bound:
+        #         out_of_bound_count += 1
             
-            if is_overlap or is_out_of_bound:
-                all_folder_count -= 1
-                continue
+        #     if is_overlap or is_out_of_bound:
+        #         all_folder_count -= 1
+        #         continue
             
-            valid_scene_infos.append({
-                'scene_id': boxes_parsed_data['scene_uid'],
-                'object_infos': models_info_parsed_data,
-            })
+        #     valid_scene_infos.append({
+        #         'scene_id': boxes_parsed_data['scene_uid'],
+        #         'object_infos': models_info_parsed_data,
+        #     })
                 
-        except:
-            error_count += 1
-            all_folder_count -= 1
-            continue
+        # except:
+        #     error_count += 1
+        #     all_folder_count -= 1
+        #     continue
+
+        valid_scene_infos.append({
+            'split': split_data[boxes_parsed_data['scene_id']],
+            'scene_id': boxes_parsed_data['scene_uid'],
+            'object_infos': models_info_parsed_data,
+        })
+
+        obj_count_list.append(len(models_info_parsed_data))
 
     # overlap count와 error count 출력
     print(f"{room} 처리 결과:")
@@ -99,6 +116,17 @@ for room in room_lists:
     print(f"  - 오류 발생 횟수: {error_count}")
     print(f"  - 총 처리된 폴더 수: {len(folder_list)}")
     print(f"  - 성공적으로 처리된 폴더 수: {all_folder_count}")
+
+        # 최대, 최소, 평균 출력
+    max_count = max(obj_count_list)  # 최대값
+    min_count = min(obj_count_list)  # 최소값
+    avg_count = sum(obj_count_list) / len(obj_count_list) if obj_count_list else 0  # 평균값
+
+    print(f"{room}의 객체 수 통계:")
+    print(f"  - 최대 객체 수: {max_count}")
+    print(f"  - 최소 객체 수: {min_count}")
+    print(f"  - 평균 객체 수: {avg_count:.2f}")
+    
     print("-----------------------------")
 
     # 각 방 유형별로 설명과 코드를 하나의 pkl 파일로 저장
