@@ -111,7 +111,7 @@ def generate_data_file(room, pkl_files, png_files, class_labels, max_obj_count, 
             obj_output = cat_one_hot + loc + scale + [rot]
             obj_outputs.append(obj_output)
         
-        if len(obj_outputs) < max_obj_count:
+        while len(obj_outputs) < max_obj_count:
             obj_outputs.append(one_hot_dict['none'] + [0, 0, 0, 0, 0, 0, 0])
 
         text_condition = generate_text_condition(object_infos)
@@ -120,15 +120,22 @@ def generate_data_file(room, pkl_files, png_files, class_labels, max_obj_count, 
         output_path = os.path.join(VALID_FOLDER_PATH, f"{room}/{mode}")
         os.makedirs(output_path, exist_ok=True)
 
+        # data = {
+        #     "scene_id": scene_id,
+        #     "room_info": room_info,
+        #     "text_condition": text_condition,
+        #     "image_condition": image_condition,
+        #     "gt_velocity_field": refine_velocity_field,
+        #     "layout": obj_outputs,
+        #     "model_ids": model_ids,
+        #     "model_categorys": categorys
+        # }
         data = {
             "scene_id": scene_id,
-            "room_info": room_info,
             "text_condition": text_condition,
             "image_condition": image_condition,
             "gt_velocity_field": refine_velocity_field,
-            "layout": obj_outputs,
-            "model_ids": model_ids,
-            "model_categorys": categorys
+            "layout": obj_outputs
         }
         output_file = os.path.join(VALID_FOLDER_PATH, f'{room}/{mode}/{scene_id}.pkl')
         with open(output_file, 'wb') as pkl_file:
